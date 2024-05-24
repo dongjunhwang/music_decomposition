@@ -205,11 +205,11 @@ class Attention(nn.Module):
 
         # aggregate
 
-        out = einsum('b h i j, b h j d -> b h i d', attn, v)
+        out_noshape = einsum('b h i j, b h j d -> b h i d', attn, v)
 
         # merge heads
 
-        out = rearrange(out, 'b h n d -> b n (h d)')
+        out = rearrange(out_noshape, 'b h n d -> b n (h d)')
         return self.to_out(out)
 
 # transformer
@@ -241,6 +241,7 @@ class Transformer(nn.Module):
         return_all_layers = False
     ):
         layers = []
+        shape_layers = []
 
         for attn, ff in self.layers:
             x = attn(x, rel_pos_bias = rel_pos_bias, mask = mask) + x
@@ -392,6 +393,9 @@ class AudioSpectrogramTransformer(nn.Module):
         self.dim = dim
         self.depth = depth
 
+        self.dim_head = dim_head
+        self.heads = heads
+
         self.patch_size = pair(patch_size)
         patch_input_dim = self.patch_size[0] * self.patch_size[1]
 
@@ -533,7 +537,10 @@ class AudioSpectrogramTransformer(nn.Module):
         # attention, what else
 
         x, all_layers = self.transformer(x, rel_pos_bias = rel_pos_bias, return_all_layers = True)
-
+        
+        all_layers_clone = all_layers.clone()
+        all_layers_clone = all_layers_clone.view(all_layers.size(0), all_layers.size(1), -1, self.heads, self.dim_head)
+        
         # final global average and norm (most recent papers show this is superior to CLS token)
 
         x = reduce(x, 'b n d -> b d', 'mean')
@@ -541,9 +548,9 @@ class AudioSpectrogramTransformer(nn.Module):
         out = self.norm(x)
 
         if not return_all_layers:
-            return out
+            return out, x_shapeshape_all_layers
 
-        return out, all_layers
+        return out, all_layers, all_layers_clone
 
 # text transformer
 
@@ -739,14 +746,14 @@ class MuLaN(nn.Module):
         wavs,
         return_all_layers = False
     ):
-        audio_embeds, audio_layers = self.audio(wavs, return_all_layers = True)
+        audio_embeds, audio_layers, embeds_shapeshape = self.audio(wavs, return_all_layers = True)
         audio_latents = self.audio_to_latents(audio_embeds)
         out = l2norm(audio_latents)
 
         if not return_all_layers:
-            return out
+            return out, embeds_shapeshape
 
-        return out, audio_layers
+        return out, audio_layers, embeds_shapeshape
 
     @beartype
     def get_text_latents(
@@ -760,9 +767,9 @@ class MuLaN(nn.Module):
         out = l2norm(text_latents)
 
         if not return_all_layers:
-            return out
+            return out, text_embeds
 
-        return out, text_layers
+        return out, text_layers, text_embeds
 
     @beartype
     def forward(
