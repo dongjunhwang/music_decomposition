@@ -360,6 +360,7 @@ class WindowAttention(nn.Module):
         extract_flag = self.i_layer == 3 and self.i_layer_depth == 1
         if self.extract_head_features and extract_flag:
             prev_proj_features = attn @ v
+            prev_proj_features = prev_proj_features.view(B_, self.num_heads/2, N, 2*(C//self.num_heads))
         x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
         x = self.proj(x) # After Projection
         x = self.proj_drop(x)
