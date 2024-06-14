@@ -335,6 +335,7 @@ class WindowAttention(nn.Module):
             x: input features with shape of (num_windows*B, N, C)
             mask: (0/-inf) mask with shape of (num_windows, Wh*Ww, Wh*Ww) or None
         """
+        extract_flag = self.i_layer == 3 and self.i_layer_depth == 1
         B_, N, C = x.shape
         qkv = self.qkv(x).reshape(B_, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
         q, k, v = qkv[0], qkv[1], qkv[2]  # make torchscript happy (cannot use tensor as tuple)
@@ -347,6 +348,14 @@ class WindowAttention(nn.Module):
         relative_position_bias = relative_position_bias.permute(2, 0, 1).contiguous()  # nH, Wh*Ww, Wh*Ww
         attn = attn + relative_position_bias.unsqueeze(0)
 
+        # if extract_flag:
+        #     self.num_heads = 16
+        #     attn = attn.view(B_, self.num_heads, N, -1)
+        #     v = v.contiguous().view(B_, self.num_heads, N*2, -1)
+        # TODO: N을 어떻게 처리할지? -> Head 강제로 down sampling
+        # TODO: prev_proj_features 이용하기?
+        # TODO: Layer 별로만 보기
+
         if mask is not None:
             nW = mask.shape[0]
             attn = attn.view(B_ // nW, nW, self.num_heads, N, N) + mask.unsqueeze(1).unsqueeze(0)
@@ -354,17 +363,16 @@ class WindowAttention(nn.Module):
             attn = self.softmax(attn)
         else:
             attn = self.softmax(attn)
-        attn = self.attn_drop(attn) # dimension: (10, 32 (H), 64 (N), 64)
+        attn = self.attn_drop(attn) # dimension: (20, 32 (H), 64 (N), 64 (D))
 
         prev_proj_features = None
-        extract_flag = self.i_layer == 3 and self.i_layer_depth == 1
         if self.extract_head_features and extract_flag:
-            prev_proj_features = attn @ v
-        x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
-        x = self.proj(x) # After Projection
+            prev_proj_features = attn @ v # Before Projection
+        x = (attn @ v).transpose(1, 2).reshape(B_, N, C) # It destroy the Head Component
+        x = self.proj(x)
         x = self.proj_drop(x)
         if self.extract_head_features and extract_flag:
-            aft_proj_features = x.transpose(1, 2).reshape(prev_proj_features.shape)
+            aft_proj_features = x.transpose(1, 2).reshape(prev_proj_features.shape) # After Projection
             return x, attn, (prev_proj_features, aft_proj_features)
         return x, attn
 
@@ -618,7 +626,7 @@ class BasicLayer(nn.Module):
         if self.downsample is not None:
             x = self.downsample(x)
         if not self.training:
-            attn = torch.cat(attns, dim = 0)
+            attn = torch.cat(attns, dim = 0) # (2, 1280, 4, 64, 64)
             attn = torch.mean(attn, dim = 0)
 
         if self.extract_head_features and self.i_layer == 3:
