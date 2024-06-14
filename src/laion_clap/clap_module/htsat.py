@@ -368,6 +368,8 @@ class WindowAttention(nn.Module):
         prev_proj_features = None
         if self.extract_head_features and extract_flag:
             prev_proj_features = attn @ v # Before Projection
+            prev_proj_features = prev_proj_features.view(B_, self.num_heads/2, N, 2*(C//self.num_heads))
+
         x = (attn @ v).transpose(1, 2).reshape(B_, N, C) # It destroy the Head Component
         x = self.proj(x)
         x = self.proj_drop(x)
