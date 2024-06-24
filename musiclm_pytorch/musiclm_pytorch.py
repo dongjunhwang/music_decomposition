@@ -251,7 +251,7 @@ class Transformer(nn.Module):
         if not return_all_layers:
             return x
 
-        return x, torch.stack(layers[:-1])
+        return x, torch.stack(layers)
 
 # contrastive losses
 
@@ -749,9 +749,6 @@ class MuLaN(nn.Module):
         audio_embeds, audio_layers, embeds_shapeshape = self.audio(wavs, return_all_layers = True)
         audio_latents = self.audio_to_latents(audio_embeds)
         out = l2norm(audio_latents)
-
-        if not return_all_layers:
-            return out, embeds_shapeshape
 
         return out, audio_layers, embeds_shapeshape
 
